@@ -2,12 +2,27 @@ name: Deploy Docs to GitHub Pages
 
 on:
   workflow_dispatch: # Enable manual trigger from the GitHub Actions tab
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/deploy-docs.yml'
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -20,6 +35,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'docs-site/package-lock.json'
 
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
       - name: Install Dependencies
         run: |
           cd docs-site
@@ -30,9 +48,11 @@ jobs:
           cd docs-site
           npm run build
 
-      - name: Deploy to GitHub Pages
-        uses: JamesIves/github-pages-deploy-action@v4
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          folder: docs-site/out
-          branch: gh-pages
-          clean: true
+          path: 'docs-site/out'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
