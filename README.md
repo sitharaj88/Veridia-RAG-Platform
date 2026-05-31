@@ -1,4 +1,4 @@
-# Aetheris RAG — Production-Grade Retrieval-Augmented Generation System
+# Aletheia RAG — Production-Grade Retrieval-Augmented Generation System
 
 A complete RAG backend built from scratch using fundamental Python libraries. No LangChain, no LlamaIndex — every component is hand-crafted with clean abstractions and swappable implementations.
 

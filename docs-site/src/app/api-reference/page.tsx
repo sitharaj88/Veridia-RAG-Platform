@@ -157,7 +157,7 @@ export default function ApiReferencePage() {
   "documents": [
     {
       "id": "e2a89c42-8f92-4f81-9b63-c7829d20c309",
-      "filename": "Aetheris_Overview.pdf",
+      "filename": "Aletheia_Overview.pdf",
       "chunk_count": 18,
       "ingested_at": "2026-05-25T08:15:32Z",
       "collection": "default",
@@ -213,17 +213,17 @@ export default function ApiReferencePage() {
       curl: `curl -X POST http://localhost:8000/api/query \\
   -H "Content-Type: application/json" \\
   -d '{
-    "query": "What is the token limit of Aetheris?",
+    "query": "What is the token limit of Aletheia?",
     "strategy": "adaptive",
     "collection": "default",
     "chat_history": []
   }'`,
       response: `{
-  "answer": "According to the Aetheris specifications, the default token configuration allows a context window of 8,192 tokens.",
+  "answer": "According to the Aletheia specifications, the default token configuration allows a context window of 8,192 tokens.",
   "sources": [
     {
       "document_id": "e2a89c42-8f92-4f81-9b63-c7829d20c309",
-      "filename": "Aetheris_Overview.pdf",
+      "filename": "Aletheia_Overview.pdf",
       "chunk_text": "The LLM context limits configure context windows to 8192 tokens...",
       "relevance_score": 0.9412
     }
@@ -276,7 +276,7 @@ data: {"timing": {"total_ms": 2341.1}, "strategy_used": "corrective"}`
       </div>
       <h1>REST API Specifications</h1>
       <p className="text-text-secondary leading-relaxed">
-        The Aetheris platform exposes a unified, highly optimized HTTP REST interface to integrate advanced local RAG capabilities directly into external microservices or frontends.
+        The Aletheia platform exposes a unified, highly optimized HTTP REST interface to integrate advanced local RAG capabilities directly into external microservices or frontends.
       </p>
 
       {/* Tabs */}
@@ -442,7 +442,7 @@ data: {"timing": {"total_ms": 2341.1}, "strategy_used": "corrective"}`
           </div>
 
           <div className="doc-alert doc-alert-tip">
-            <strong>Endpoint Override:</strong> If you are deploying the backend on a remote host, configure the <code>BACKEND_URL</code> environment variable inside the Next.js process environment to point to the remote address, e.g., <code>BACKEND_URL=https://api.aetheris.internal</code>.
+            <strong>Endpoint Override:</strong> If you are deploying the backend on a remote host, configure the <code>BACKEND_URL</code> environment variable inside the Next.js process environment to point to the remote address, e.g., <code>BACKEND_URL=https://api.aletheia.internal</code>.
           </div>
         </div>
       )}

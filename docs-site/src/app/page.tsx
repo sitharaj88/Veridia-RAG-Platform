@@ -30,9 +30,9 @@ export default function Home() {
       <div className="flex items-center gap-2 mb-2 text-accent-cyan text-sm font-semibold tracking-wider uppercase">
         <Sparkles className="h-4 w-4" /> Technical Documentation
       </div>
-      <h1>Aetheris RAG Platform</h1>
+      <h1>Aletheia RAG Platform</h1>
       <p className="text-lg text-text-secondary leading-relaxed">
-        Welcome to the technical documentation site for Aetheris RAG — a state-of-the-art, local-first Retrieval-Augmented Generation system, co-designed and engineered by the Antigravity Coding Agent. This documentation covers the architecture, strategies, mathematical formulations, and step-by-step procedures powering the application.
+        Welcome to the technical documentation site for Aletheia RAG — a state-of-the-art, local-first Retrieval-Augmented Generation system, co-designed and engineered by the Antigravity Coding Agent. This documentation covers the architecture, strategies, mathematical formulations, and step-by-step procedures powering the application.
       </p>
 
       <h2>Technological Stack</h2>
@@ -52,7 +52,7 @@ export default function Home() {
 
       <h2>Core Techniques Implemented</h2>
       <p>
-        Aetheris RAG Platform moves beyond standard vector matching to solve real-world context constraints and hallucinations:
+        Aletheia RAG Platform moves beyond standard vector matching to solve real-world context constraints and hallucinations:
       </p>
 
       <ul className="space-y-4 my-6">

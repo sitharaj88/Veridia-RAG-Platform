@@ -95,7 +95,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
               <BookOpen className="h-5 w-5 text-white" />
             </div>
             <div>
-              <span className="font-bold tracking-tight text-text-primary block">Aetheris Docs</span>
+              <span className="font-bold tracking-tight text-text-primary block">Aletheia Docs</span>
               <span className="text-[10px] text-accent-cyan font-mono block">v2.1.0 • Technical</span>
             </div>
           </div>

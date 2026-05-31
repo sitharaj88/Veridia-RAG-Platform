@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
-        title="Aetheris RAG Platform",
+        title="Aletheia RAG Platform",
         description="AI-Powered Knowledge Base with advanced RAG strategies, co-designed by Antigravity Coding Agent",
         version="1.0.0",
         lifespan=lifespan,

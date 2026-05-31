@@ -150,7 +150,7 @@ export default function ChatPage() {
     setTheme(next);
     document.documentElement.setAttribute("data-theme", next);
     try {
-      localStorage.setItem("aetheris-theme", next);
+      localStorage.setItem("aletheia-theme", next);
     } catch (e) {}
   };
 
@@ -646,7 +646,7 @@ export default function ChatPage() {
               </div>
               <div>
                 <h1 className="text-sm font-bold bg-gradient-to-r from-accent-start to-accent-cyan bg-clip-text text-transparent leading-none">
-                  Aetheris RAG Platform
+                  Aletheia RAG Platform
                 </h1>
                 <span className="text-[10px] text-text-muted font-medium uppercase tracking-wider">
                   AI Knowledge Base
@@ -901,7 +901,7 @@ export default function ChatPage() {
               
               <h2 className="text-3xl font-extrabold mb-3 leading-tight tracking-tight relative">
                 <span className="bg-gradient-to-r from-accent-start via-accent-cyan to-accent-start bg-[length:200%_auto] bg-clip-text text-transparent animate-[gradientFlow_6s_ease_infinite]">
-                  Aetheris RAG Platform
+                  Aletheia RAG Platform
                 </span>
               </h2>
               <p className="text-text-secondary text-sm max-w-[450px] mb-8 leading-relaxed">
