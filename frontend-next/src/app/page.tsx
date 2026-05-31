@@ -721,7 +721,7 @@ export default function ChatPage() {
               </div>
               
               <div className="max-h-[200px] overflow-y-auto mb-2 pr-1 border border-dashed border-border-muted rounded-xl p-2 bg-bg-deep/20">
-                {documents.length === 0 ? (
+                {documents.length === 0 && !isUploading ? (
                   <div className="text-xs italic text-text-muted p-3 text-center">No documents yet</div>
                 ) : (
                   <ul className="space-y-1.5">
@@ -750,6 +750,23 @@ export default function ChatPage() {
                         </div>
                       </li>
                     ))}
+                    {isUploading && (
+                      <li className="group flex flex-col gap-1 px-2.5 py-2 rounded-lg bg-accent-cyan/5 text-xs border border-dashed border-accent-cyan/35 animate-pulse">
+                        <div className="flex items-center justify-between w-full">
+                          <span className="truncate font-medium text-text-primary flex-1 pr-2">
+                            Ingesting new document...
+                          </span>
+                          <span className="h-3.5 w-3.5 rounded-full border-2 border-accent-cyan border-t-transparent animate-spin shrink-0"></span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[9px] text-text-muted">
+                          <span className="bg-accent-cyan/15 text-accent-cyan px-1.5 py-0.5 rounded font-mono font-semibold uppercase tracking-wider">
+                            Processing Chunks
+                          </span>
+                          <span>•</span>
+                          <span>running SOTA pipeline</span>
+                        </div>
+                      </li>
+                    )}
                   </ul>
                 )}
               </div>
