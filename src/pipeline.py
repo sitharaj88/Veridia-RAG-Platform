@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Callable, Generator, Optional
+
 
 from src.config.settings import Settings, get_settings
 from src.embedding.base import BaseEmbedder
@@ -289,6 +290,7 @@ class RAGPipeline:
         self,
         path: Path | str,
         extensions: Optional[list[str]] = None,
+        progress_callback: Optional[Callable[[str, float, dict], None]] = None,
     ) -> IngestionStats:
         """
         Ingest documents from a file or directory.
@@ -297,17 +299,27 @@ class RAGPipeline:
         """
         path = Path(path)
         if path.is_dir():
+            # For directories we could also add callbacks if supported,
+            # but currently we support it on single files
             stats = self.ingestion_pipeline.ingest_directory(
                 path, extensions=extensions
             )
         else:
-            stats = self.ingestion_pipeline.ingest_file(path)
+            stats = self.ingestion_pipeline.ingest_file(
+                path, progress_callback=progress_callback
+            )
 
         # Rebuild BM25 index
+        if progress_callback:
+            progress_callback("indexing", 0.9, {"message": "Rebuilding sparse keyword index..."})
         self.sparse_retriever.build_index()
         self.sparse_retriever.save_index()
 
+        if progress_callback:
+            progress_callback("completed", 1.0, {"message": "Ingestion completed successfully", "chunks_created": stats.total_chunks})
+
         return stats
+
 
     def query(
         self,

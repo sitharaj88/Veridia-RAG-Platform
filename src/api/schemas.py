@@ -58,6 +58,23 @@ class IngestResponse(BaseModel):
     chunks_created: int = 0
     time_taken_ms: float = 0.0
     errors: List[str] = Field(default_factory=list)
+    task_ids: List[str] = Field(default_factory=list)
+
+
+class IngestTaskStatus(BaseModel):
+    """Status of a background ingestion task."""
+    task_id: str
+    filename: str
+    collection: str
+    status: str  # pending, processing, completed, failed
+    progress: float
+    step: str
+    message: str
+    chunks_created: int = 0
+    time_taken_ms: float = 0.0
+    error: Optional[str] = None
+    completed_at: Optional[str] = None
+
 
 
 # ── Documents ────────────────────────────────────────────────────────────────

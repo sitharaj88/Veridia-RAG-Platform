@@ -29,7 +29,28 @@ try:
         files = {"files": (pdf_path.name, f, "application/pdf")}
         r = httpx.post(f"{API_URL}/ingest", files=files, timeout=120.0)
         print("Ingest status:", r.status_code)
-        print("Ingest response:", r.json())
+        resp_data = r.json()
+        print("Ingest response:", resp_data)
+        
+        task_ids = resp_data.get("task_ids", [])
+        if task_ids:
+            task_id = task_ids[0]
+            print(f"Waiting for background task {task_id} to finish...")
+            import time
+            while True:
+                status_r = httpx.get(f"{API_URL}/ingest/tasks/{task_id}")
+                task_status = status_r.json()
+                status = task_status.get("status")
+                progress = task_status.get("progress")
+                message = task_status.get("message")
+                print(f"Status: {status} | Progress: {progress*100:.0f}% | Message: {message}")
+                if status == "completed":
+                    print("Ingestion completed successfully!")
+                    break
+                elif status == "failed":
+                    print(f"Ingestion failed: {task_status.get('error')}")
+                    sys.exit(1)
+                time.sleep(3.0)
 except Exception as e:
     print("Ingestion failed:", e)
     sys.exit(1)

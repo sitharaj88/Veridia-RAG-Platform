@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
 
 from src.embedding.base import BaseEmbedder
 from src.ingestion.chunker import BaseChunker
@@ -47,7 +48,11 @@ class IngestionPipeline:
         self.embedder = embedder
         self.vector_store = vector_store
 
-    def ingest_file(self, path: Path) -> IngestionStats:
+    def ingest_file(
+        self,
+        path: Path,
+        progress_callback: Optional[Callable[[str, float, dict], None]] = None,
+    ) -> IngestionStats:
         """Ingest a single file through the full pipeline."""
         start = time.perf_counter()
         stats = IngestionStats()
@@ -55,37 +60,57 @@ class IngestionPipeline:
 
         log.info(f"Ingesting file: {path}")
 
+        if progress_callback:
+            progress_callback("loading", 0.1, {"message": f"Parsing file: {path.name}..."})
+
         # 1. Load
         documents = self.loader.load_file(path)
         if not documents:
             stats.failed_files.append(str(path))
             stats.elapsed_seconds = time.perf_counter() - start
+            if progress_callback:
+                progress_callback("failed", 1.0, {"error": "Failed to parse document text (0 pages extracted)"})
             return stats
 
         stats.total_files = 1
         stats.total_documents = len(documents)
 
         # 2. Preprocess
+        if progress_callback:
+            progress_callback("preprocessing", 0.2, {"message": "Cleaning and preprocessing text..."})
         documents = self.preprocessor.preprocess_batch(documents)
 
         # 3. Chunk
         all_chunks: list[Chunk] = []
-        for doc in documents:
+        for idx, doc in enumerate(documents):
+            if progress_callback:
+                page_info = f" (page {idx + 1} of {len(documents)})" if len(documents) > 1 else ""
+                progress_callback(
+                    "chunking",
+                    0.2 + (idx / len(documents)) * 0.5,
+                    {"message": f"Splitting text and generating context{page_info}..."}
+                )
             chunks = self.chunker.chunk(doc)
             all_chunks.extend(chunks)
 
         if not all_chunks:
             log.warning(f"No chunks produced from {path}")
             stats.elapsed_seconds = time.perf_counter() - start
+            if progress_callback:
+                progress_callback("failed", 1.0, {"error": "No text chunks generated from file"})
             return stats
 
         # 4. Embed
+        if progress_callback:
+            progress_callback("embedding", 0.75, {"message": f"Generating embeddings for {len(all_chunks)} chunk(s)..."})
         texts = [c.content for c in all_chunks]
         embeddings = self.embedder.embed_batch(texts)
         for chunk, emb in zip(all_chunks, embeddings):
             chunk.embedding = emb
 
         # 5. Store
+        if progress_callback:
+            progress_callback("storing", 0.85, {"message": f"Saving {len(all_chunks)} chunk(s) in ChromaDB..."})
         self.vector_store.add(all_chunks)
 
         stats.total_chunks = len(all_chunks)
@@ -96,6 +121,7 @@ class IngestionPipeline:
             f"{stats.total_chunks} chunk(s) in {stats.elapsed_seconds:.2f}s"
         )
         return stats
+
 
     def ingest_directory(
         self,

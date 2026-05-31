@@ -56,6 +56,21 @@ interface DocumentInfo {
   file_size: number;
 }
 
+interface IngestTaskStatus {
+  task_id: string;
+  filename: string;
+  collection: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  progress: number;
+  step: string;
+  message: string;
+  chunks_created: number;
+  time_taken_ms: number;
+  error?: string | null;
+  completed_at?: string | null;
+}
+
+
 interface CollectionInfo {
   name: string;
   document_count: number;
@@ -126,6 +141,8 @@ export default function ChatPage() {
   // Upload status animation
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
+  const [activeTasks, setActiveTasks] = useState<IngestTaskStatus[]>([]);
+
 
   // --- Refs ---
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -240,9 +257,22 @@ export default function ChatPage() {
     }
   };
 
+  const fetchIngestTasks = async (collectionName?: string) => {
+    try {
+      const col = collectionName !== undefined ? collectionName : activeCollection;
+      const resp = await fetch(`/api/ingest/tasks?collection=${encodeURIComponent(col)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setActiveTasks(data || []);
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
     fetchDocuments(activeCollection);
+    fetchIngestTasks(activeCollection);
   }, [activeCollection]);
+
 
   const checkHealth = async () => {
     try {
@@ -343,11 +373,32 @@ export default function ChatPage() {
     }
   };
 
+  const handleClearAllDocuments = async () => {
+    if (!confirm(`Clear all documents in collection "${activeCollection}"? This is permanent.`)) return;
+
+    try {
+      const resp = await fetch(`/api/documents?collection=${encodeURIComponent(activeCollection)}`, {
+        method: "DELETE"
+      });
+      if (resp.status === 204) {
+        showToast("Collection cleared successfully", "success");
+        fetchDocuments(activeCollection);
+        fetchCollections();
+        checkHealth();
+      } else {
+        const err = await resp.json();
+        showToast(err.error || "Failed to clear collection", "error");
+      }
+    } catch (e: any) {
+      showToast(e.message || "Failed to clear collection", "error");
+    }
+  };
+
   const handleUploadFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setIsUploading(true);
     setIsSidebarOpen(true);
-    showToast(`Uploading ${files.length} file(s)...`, "info");
+    showToast(`Uploading ${files.length} file(s) for background processing...`, "info");
 
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
@@ -363,16 +414,8 @@ export default function ChatPage() {
 
       if (resp.ok) {
         const data = await resp.json();
-        showToast(
-          `Successfully processed ${data.files_processed} file(s), created ${data.chunks_created} chunks!`,
-          "success"
-        );
-        if (data.errors && data.errors.length > 0) {
-          data.errors.forEach((err: string) => showToast(err, "warning"));
-        }
-        fetchDocuments(activeCollection);
-        fetchCollections();
-        checkHealth();
+        showToast(data.message || "Files uploaded. Processing in background...", "info");
+        fetchIngestTasks(activeCollection);
       } else {
         const err = await resp.json();
         showToast(err.error || "File upload failed", "error");
@@ -384,6 +427,68 @@ export default function ChatPage() {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
+
+  useEffect(() => {
+    const activeRunningTasks = activeTasks.filter(
+      (t) => t.status === "pending" || t.status === "processing"
+    );
+    if (activeRunningTasks.length === 0) return;
+
+    let timer: NodeJS.Timeout;
+
+    const pollTasks = async () => {
+      try {
+        const resp = await fetch(`/api/ingest/tasks?collection=${encodeURIComponent(activeCollection)}`);
+        if (resp.ok) {
+          const serverTasks: IngestTaskStatus[] = await resp.json();
+          
+          const serverTasksMap = new Map(serverTasks.map((t) => [t.task_id, t]));
+          
+          let completedAny = false;
+          let failedAny = false;
+          
+          const updatedTasks = activeTasks.map((localTask) => {
+            const serverTask = serverTasksMap.get(localTask.task_id);
+            if (!serverTask) return localTask;
+            
+            if (localTask.status !== "completed" && serverTask.status === "completed") {
+              completedAny = true;
+              showToast(`"${serverTask.filename}" processed: created ${serverTask.chunks_created} chunks!`, "success");
+            } else if (localTask.status !== "failed" && serverTask.status === "failed") {
+              failedAny = true;
+              showToast(`Failed to process "${serverTask.filename}": ${serverTask.error}`, "error");
+            }
+            
+            return serverTask;
+          });
+          
+          const localTaskIds = new Set(activeTasks.map(t => t.task_id));
+          for (const serverTask of serverTasks) {
+            if (!localTaskIds.has(serverTask.task_id) && (serverTask.status === "pending" || serverTask.status === "processing" || serverTask.status === "failed")) {
+              updatedTasks.push(serverTask);
+            }
+          }
+          
+          setActiveTasks(updatedTasks);
+          
+          if (completedAny || failedAny) {
+            fetchDocuments(activeCollection);
+            fetchCollections();
+            checkHealth();
+          }
+        }
+      } catch (e) {
+        console.error("Error polling tasks:", e);
+      }
+    };
+
+    timer = setInterval(pollTasks, 1500);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [activeTasks, activeCollection]);
+
 
   // --- Chat Streaming Pipeline ---
   const handleSendQuery = async () => {
@@ -711,13 +816,86 @@ export default function ChatPage() {
               </ul>
             </div>
 
+            {/* Active/Failed Background Tasks */}
+            {activeTasks.filter(t => t.status === "pending" || t.status === "processing" || t.status === "failed").length > 0 && (
+              <div className="mb-4 border border-border-light bg-bg-surface/50 rounded-xl p-3 shadow-inner">
+                <div className="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    {activeTasks.some(t => t.status === "pending" || t.status === "processing") ? (
+                      <>
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-cyan opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-cyan"></span>
+                        </span>
+                        Ingestion Queue
+                      </>
+                    ) : (
+                      "Ingestion Status"
+                    )}
+                  </span>
+                  {activeTasks.some(t => t.status === "failed") && (
+                    <button
+                      onClick={() => setActiveTasks(prev => prev.filter(t => t.status !== "failed"))}
+                      className="text-[9px] text-text-muted hover:text-text-primary hover:underline cursor-pointer"
+                    >
+                      Clear Failures
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-3 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin">
+                  {activeTasks.filter(t => t.status === "pending" || t.status === "processing" || t.status === "failed").map((task) => (
+                    <div key={task.task_id} className="text-[11px] flex flex-col gap-1 border-b border-border-muted pb-2 last:border-0 last:pb-0">
+                      <div className="flex justify-between items-center overflow-hidden gap-2">
+                        <span className="text-text-primary truncate font-medium" title={task.filename}>
+                          {task.filename}
+                        </span>
+                        {task.status === "failed" ? (
+                          <span className="text-[8px] text-error font-bold bg-error/10 px-1 rounded flex items-center gap-0.5">
+                            <AlertTriangle className="h-2 w-2" /> Failed
+                          </span>
+                        ) : (
+                          <span className="text-[9px] text-accent-cyan font-bold bg-bg-deep px-1 rounded">
+                            {Math.round(task.progress * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      
+                      {task.status !== "failed" && (
+                        <div className="w-full bg-bg-deep rounded-full h-1 overflow-hidden">
+                          <div
+                            className="bg-gradient-to-r from-accent-start to-accent-cyan h-1 rounded-full transition-all duration-500"
+                            style={{ width: `${task.progress * 100}%` }}
+                          ></div>
+                        </div>
+                      )}
+                      
+                      <div className={`text-[9px] leading-tight ${task.status === "failed" ? "text-error whitespace-normal break-words" : "text-text-secondary truncate"}`} title={task.status === "failed" ? task.error || "" : task.message}>
+                        {task.status === "failed" ? task.error || "Ingestion failed" : task.message || "Queueing..."}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Documents */}
             <div className="mb-4">
               <div className="flex items-center justify-between text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-2">
                 <span className="flex items-center gap-1.5"><FileText className="h-3 w-3" /> Documents</span>
-                <span className="text-[10px] bg-bg-elevated text-text-secondary px-1.5 py-0.5 rounded-full font-bold">
-                  {documents.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  {documents.length > 0 && (
+                    <button
+                      onClick={handleClearAllDocuments}
+                      className="text-[10px] text-text-muted hover:text-error hover:bg-bg-elevated px-1.5 py-0.5 rounded flex items-center gap-0.5 cursor-pointer transition-colors"
+                      title="Clear all documents"
+                    >
+                      <Trash2 className="h-3 w-3" /> Clear All
+                    </button>
+                  )}
+                  <span className="text-[10px] bg-bg-elevated text-text-secondary px-1.5 py-0.5 rounded-full font-bold">
+                    {documents.length}
+                  </span>
+                </div>
               </div>
               
               <div className="max-h-[200px] overflow-y-auto mb-2 pr-1 border border-dashed border-border-muted rounded-xl p-2 bg-bg-deep/20">

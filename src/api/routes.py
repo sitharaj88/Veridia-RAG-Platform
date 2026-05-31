@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, BackgroundTasks
 from fastapi.responses import StreamingResponse
 
 from .schemas import (
@@ -22,6 +22,7 @@ from .schemas import (
     ErrorResponse,
     HealthStatus,
     IngestResponse,
+    IngestTaskStatus,
     QueryRequest,
     QueryResponse,
     ServiceStatus,
@@ -335,82 +336,183 @@ async def delete_document(doc_id: str, collection: str | None = None):
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
 
 
-# ── Ingest ───────────────────────────────────────────────────────────────────
+@router.delete("/documents", status_code=204)
+async def delete_all_documents(collection: str | None = None):
+    """Delete all documents and chunks in a collection."""
+    global _documents
+    pipeline = _get_pipeline()
+    if pipeline:
+        try:
+            if collection:
+                pipeline.switch_collection(collection)
+            chunks = pipeline.vector_store.get_all_chunks()
+            chunk_ids_to_delete = [chunk.id for chunk in chunks]
+            
+            if chunk_ids_to_delete:
+                pipeline.vector_store.delete(chunk_ids_to_delete)
+                
+            # Rebuild BM25 index
+            pipeline.sparse_retriever.build_index()
+            pipeline.sparse_retriever.save_index()
+            
+            # Clear local documents cache matching the collection
+            col_name = pipeline.vector_store.collection_name
+            _documents = {k: v for k, v in _documents.items() if v.collection != col_name}
+            return
+        except Exception as e:
+            logger.error("Error clearing collection: %s", e)
+            raise HTTPException(status_code=500, detail=str(e))
+            
+    # Fallback clear cache
+    col = collection or "default"
+    _documents = {k: v for k, v in _documents.items() if v.collection != col}
+
+
+# ── Ingest Tasks Status Store ────────────────────────────────────────────────
+ingest_tasks: dict[str, dict] = {}
+
+
+def run_ingest_task(task_id: str, file_path: Path, filename: str, collection: str, file_size: int):
+    """Background runner for document ingestion."""
+    start = time.perf_counter()
+    from pathlib import Path
+
+    def cb(step: str, progress: float, details: dict):
+        if task_id in ingest_tasks:
+            ingest_tasks[task_id]["step"] = step
+            ingest_tasks[task_id]["progress"] = progress
+            ingest_tasks[task_id]["message"] = details.get("message", "")
+            if step == "completed":
+                ingest_tasks[task_id]["status"] = "completed"
+                ingest_tasks[task_id]["chunks_created"] = details.get("chunks_created", 0)
+                ingest_tasks[task_id]["time_taken_ms"] = round((time.perf_counter() - start) * 1000, 2)
+                ingest_tasks[task_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+                
+                # Register in local cache as fallback
+                _documents[task_id] = DocumentInfo(
+                    id=task_id,
+                    filename=filename,
+                    chunk_count=details.get("chunks_created", 0),
+                    ingested_at=datetime.now(timezone.utc).isoformat(),
+                    collection=collection,
+                    file_size=file_size,
+                )
+            elif step == "failed":
+                ingest_tasks[task_id]["status"] = "failed"
+                ingest_tasks[task_id]["error"] = details.get("error", "Unknown error")
+                ingest_tasks[task_id]["time_taken_ms"] = round((time.perf_counter() - start) * 1000, 2)
+                ingest_tasks[task_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        if task_id in ingest_tasks:
+            ingest_tasks[task_id]["status"] = "processing"
+            
+        pipeline = _get_pipeline()
+        if not pipeline:
+            raise Exception("RAG pipeline not initialized")
+            
+        # Switch collection
+        pipeline.switch_collection(collection)
+        # Process file ingestion
+        pipeline.ingest(file_path, progress_callback=cb)
+
+    except Exception as e:
+        logger.error("Background ingestion error for %s: %s", filename, e, exc_info=True)
+        cb("failed", 1.0, {"error": str(e)})
+
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_files(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     collection: str = Form("default"),
 ):
-    """Upload and ingest files into the RAG system."""
+    """Upload and queue files for background ingestion."""
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
-    start = time.perf_counter()
-    total_chunks = 0
-    errors: list[str] = []
-
-    pipeline = _get_pipeline()
-
-    # Save files to data/raw/ directory then ingest
-    import tempfile
     from pathlib import Path
-
     raw_dir = Path("data/raw")
     raw_dir.mkdir(parents=True, exist_ok=True)
 
+    task_ids = []
+
     for f in files:
+        task_id = str(uuid.uuid4())
+        filename = f.filename or "unknown"
+        task_ids.append(task_id)
+
         try:
             content = await f.read()
-            doc_id = str(uuid.uuid4())
-            filename = f.filename or "unknown"
-
             # Save file to disk
-            file_path = raw_dir / f"{doc_id}_{filename}"
+            file_path = raw_dir / f"{task_id}_{filename}"
             file_path.write_bytes(content)
 
-            if pipeline:
-                try:
-                    # Switch collection before ingestion
-                    pipeline.switch_collection(collection)
-                    # Run sync pipeline.ingest in a thread to not block event loop
-                    stats = await asyncio.to_thread(
-                        pipeline.ingest, file_path
-                    )
-                    chunks = stats.total_chunks if hasattr(stats, 'total_chunks') else 0
-                    total_chunks += chunks
-                except Exception as e:
-                    logger.warning("Pipeline ingest failed for %s: %s", filename, e)
-                    errors.append(f"{filename}: pipeline error — {e}")
-                    continue
+            # Register task progress
+            ingest_tasks[task_id] = {
+                "task_id": task_id,
+                "filename": filename,
+                "collection": collection,
+                "status": "pending",
+                "progress": 0.0,
+                "step": "queued",
+                "message": "Queued for background processing...",
+                "chunks_created": 0,
+                "time_taken_ms": 0.0,
+                "error": None,
+                "completed_at": None,
+            }
 
-            # Track document in local store
-            _documents[doc_id] = DocumentInfo(
-                id=doc_id,
+            # Enqueue FastAPI background task
+            background_tasks.add_task(
+                run_ingest_task,
+                task_id=task_id,
+                file_path=file_path,
                 filename=filename,
-                chunk_count=total_chunks,
-                ingested_at=datetime.now(timezone.utc).isoformat(),
                 collection=collection,
                 file_size=len(content),
             )
-
-            # Update collection stats
-            if collection in _collections:
-                _collections[collection].document_count += 1
-                _collections[collection].chunk_count += total_chunks
-
         except Exception as e:
-            logger.error("Error ingesting %s: %s", f.filename, e)
-            errors.append(f"{f.filename}: {e}")
+            logger.error("Error queueing %s: %s", filename, e)
+            ingest_tasks[task_id] = {
+                "task_id": task_id,
+                "filename": filename,
+                "collection": collection,
+                "status": "failed",
+                "progress": 1.0,
+                "step": "failed",
+                "message": "Failed to queue file",
+                "chunks_created": 0,
+                "time_taken_ms": 0.0,
+                "error": str(e),
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }
 
-    elapsed_ms = (time.perf_counter() - start) * 1000
     return IngestResponse(
-        message=f"Processed {len(files)} file(s)",
-        files_processed=len(files) - len(errors),
-        chunks_created=total_chunks,
-        time_taken_ms=round(elapsed_ms, 2),
-        errors=errors,
+        message=f"Queued {len(files)} file(s) for processing",
+        files_processed=len(files),
+        chunks_created=0,
+        time_taken_ms=0.0,
+        errors=[],
+        task_ids=task_ids,
     )
+
+
+@router.get("/ingest/tasks", response_model=List[IngestTaskStatus])
+async def list_ingest_tasks(collection: str | None = None):
+    """List all background ingestion tasks."""
+    tasks = list(ingest_tasks.values())
+    if collection:
+        tasks = [t for t in tasks if t["collection"] == collection]
+    return [IngestTaskStatus(**t) for t in tasks]
+
+
+@router.get("/ingest/tasks/{task_id}", response_model=IngestTaskStatus)
+async def get_ingest_task(task_id: str):
+    """Get the status of a specific background ingestion task."""
+    if task_id not in ingest_tasks:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    return IngestTaskStatus(**ingest_tasks[task_id])
 
 
 # ── Query ────────────────────────────────────────────────────────────────────
